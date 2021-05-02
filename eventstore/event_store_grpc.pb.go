@@ -18,8 +18,11 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type EventStoreClient interface {
+	// Get all events that match a set of tags, an event must have all the tags that are requested to be returned
 	GetEvents(ctx context.Context, in *GetEventRequest, opts ...grpc.CallOption) (EventStore_GetEventsClient, error)
+	// Stores events that come in on the stream
 	StoreEvents(ctx context.Context, opts ...grpc.CallOption) (EventStore_StoreEventsClient, error)
+	// Returns the server metrics
 	ServerMetrics(ctx context.Context, in *ServerMestricsRequest, opts ...grpc.CallOption) (*ServerMetricsResponse, error)
 }
 
@@ -110,8 +113,11 @@ func (c *eventStoreClient) ServerMetrics(ctx context.Context, in *ServerMestrics
 // All implementations must embed UnimplementedEventStoreServer
 // for forward compatibility
 type EventStoreServer interface {
+	// Get all events that match a set of tags, an event must have all the tags that are requested to be returned
 	GetEvents(*GetEventRequest, EventStore_GetEventsServer) error
+	// Stores events that come in on the stream
 	StoreEvents(EventStore_StoreEventsServer) error
+	// Returns the server metrics
 	ServerMetrics(context.Context, *ServerMestricsRequest) (*ServerMetricsResponse, error)
 	mustEmbedUnimplementedEventStoreServer()
 }

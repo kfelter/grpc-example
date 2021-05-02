@@ -6,10 +6,13 @@ package eventstore;
 
 // Interface exported by the server.
 service EventStore {
+  // Get all events that match a set of tags, an event must have all the tags that are requested to be returned
   rpc GetEvents(GetEventRequest) returns (stream Event) {}
 
+  // Stores events that come in on the stream
   rpc StoreEvents(stream Event) returns (StoreEventsResponse) {}
 
+  // Returns the server metrics
   rpc ServerMetrics(ServerMestricsRequest) returns (ServerMetricsResponse) {}
 }
 
@@ -33,4 +36,5 @@ message ServerMetricsResponse{
     string status = 1;
     string avg_get_query_duration = 2;
     string avg_store_duration = 3;
+    int64 len_events = 4;
 }
