@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -8,6 +10,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	pb "github.com/kfelter/grpc-example/eventstore"
 	"google.golang.org/grpc"
@@ -21,6 +24,7 @@ type eventStoreServer struct {
 }
 
 func (s *eventStoreServer) GetEvents(req *pb.GetEventRequest, stream pb.EventStore_GetEventsServer) error {
+	start := time.Now()
 	var err error
 	for _, event := range s.events {
 		if hasAll(event.Tags, req.Tags) {
@@ -30,6 +34,8 @@ func (s *eventStoreServer) GetEvents(req *pb.GetEventRequest, stream pb.EventSto
 			}
 		}
 	}
+	end := time.Now()
+	s.newGetMetric(start, end)
 	return nil
 }
 
@@ -60,10 +66,13 @@ func getID(tags []string) string {
 }
 
 func (s *eventStoreServer) StoreEvents(stream pb.EventStore_StoreEventsServer) error {
+	start := time.Now()
 	events := []*pb.Event{}
 	for {
 		newevent, err := stream.Recv()
 		if err == io.EOF {
+			end := time.Now()
+			s.newStoreMetric(start, end)
 			return stream.SendAndClose(&pb.StoreEventsResponse{
 				Events: events,
 				Status: fmt.Sprintf("added %d events", len(events)),
@@ -82,6 +91,52 @@ func (s *eventStoreServer) StoreEvents(stream pb.EventStore_StoreEventsServer) e
 		s.idCounter++
 		s.mu.Unlock()
 	}
+}
+
+type Metric struct {
+	Start time.Time     `json:"start"`
+	End   time.Time     `json:"end"`
+	Dur   time.Duration `json:"duration"`
+}
+
+func (s *eventStoreServer) newStoreMetric(start, end time.Time) {
+	e := createMetric(start, end, "internal:true", "metric:store")
+	s.mu.Lock()
+	s.events = append(s.events, e)
+	s.mu.Unlock()
+}
+
+func (s *eventStoreServer) newGetMetric(start, end time.Time) {
+	e := createMetric(start, end, "internal:true", "metric:get")
+	s.mu.Lock()
+	s.events = append(s.events, e)
+	s.mu.Unlock()
+}
+
+func createMetric(start, end time.Time, tags ...string) *pb.Event {
+	b, _ := json.Marshal(Metric{start, end, end.Sub(start)})
+	return &pb.Event{
+		Tags:    tags,
+		Content: b,
+	}
+}
+
+func (s *eventStoreServer) ServerMetrics(c context.Context, req *pb.ServerMestricsRequest) (*pb.ServerMetricsResponse, error) {
+	res := &pb.ServerMetricsResponse{
+		Status:              "OK",
+		AvgGetQueryDuration: s.getAvgGetQueryDuration(),
+		AvgStoreDuration:    s.getAvgStoreDuration(),
+		LenEvents:           s.idCounter,
+	}
+	return res, nil
+}
+
+func (s *eventStoreServer) getAvgGetQueryDuration() string {
+	return ""
+}
+
+func (s *eventStoreServer) getAvgStoreDuration() string {
+	return ""
 }
 
 var (
