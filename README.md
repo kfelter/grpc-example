@@ -276,3 +276,8 @@ tags:"env:prod" tags:"id:14" content:"example event 5 Sun May  2 18:11:02 EDT 20
 tags:"env:prod" tags:"id:17" content:"example event 6 Sun May  2 18:11:02 EDT 2021"
 ...
 ```
+Get Server Metrics
+```sh
+$ make metric
+status:"OK" avg_get_query_duration:"7.475534ms" avg_store_duration:"89.914µs" len_events:61708
+```
