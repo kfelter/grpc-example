@@ -16,6 +16,11 @@ import (
 	"google.golang.org/grpc"
 )
 
+var (
+	getMetricTags   = []string{"internal:true", "metric:get"}
+	storeMetricTags = []string{"internal:true", "metric:store"}
+)
+
 type eventStoreServer struct {
 	pb.UnimplementedEventStoreServer
 	mu        sync.Mutex
@@ -26,17 +31,26 @@ type eventStoreServer struct {
 func (s *eventStoreServer) GetEvents(req *pb.GetEventRequest, stream pb.EventStore_GetEventsServer) error {
 	start := time.Now()
 	var err error
-	for _, event := range s.events {
-		if hasAll(event.Tags, req.Tags) {
-			fmt.Println("matched", req.Tags, "sending event", getID(event.GetTags()))
-			if err = stream.Send(event); err != nil {
-				return err
-			}
-		}
-	}
+	events := s.getEventsWithTags(req.Tags)
 	end := time.Now()
 	s.newGetMetric(start, end)
+	for _, event := range events {
+		fmt.Println("matched", req.Tags, "sending event", getID(event.GetTags()))
+		if err = stream.Send(event); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (s *eventStoreServer) getEventsWithTags(t []string) []*pb.Event {
+	events := []*pb.Event{}
+	for _, event := range s.events {
+		if hasAll(event.Tags, t) {
+			events = append(events, event)
+		}
+	}
+	return events
 }
 
 func hasAll(has, requested []string) bool {
@@ -100,14 +114,14 @@ type Metric struct {
 }
 
 func (s *eventStoreServer) newStoreMetric(start, end time.Time) {
-	e := createMetric(start, end, "internal:true", "metric:store")
+	e := createMetric(start, end, storeMetricTags...)
 	s.mu.Lock()
 	s.events = append(s.events, e)
 	s.mu.Unlock()
 }
 
 func (s *eventStoreServer) newGetMetric(start, end time.Time) {
-	e := createMetric(start, end, "internal:true", "metric:get")
+	e := createMetric(start, end, getMetricTags...)
 	s.mu.Lock()
 	s.events = append(s.events, e)
 	s.mu.Unlock()
@@ -122,21 +136,51 @@ func createMetric(start, end time.Time, tags ...string) *pb.Event {
 }
 
 func (s *eventStoreServer) ServerMetrics(c context.Context, req *pb.ServerMestricsRequest) (*pb.ServerMetricsResponse, error) {
+	avgGet, err := s.getAvgGetQueryDuration()
+	if err != nil {
+		return nil, err
+	}
+
+	avgStore, err := s.getAvgStoreDuration()
+	if err != nil {
+		return nil, err
+	}
 	res := &pb.ServerMetricsResponse{
 		Status:              "OK",
-		AvgGetQueryDuration: s.getAvgGetQueryDuration(),
-		AvgStoreDuration:    s.getAvgStoreDuration(),
+		AvgGetQueryDuration: avgGet,
+		AvgStoreDuration:    avgStore,
 		LenEvents:           s.idCounter,
 	}
 	return res, nil
 }
 
-func (s *eventStoreServer) getAvgGetQueryDuration() string {
-	return ""
+func (s *eventStoreServer) getAvgGetQueryDuration() (string, error) {
+	events := s.getEventsWithTags(getMetricTags)
+	return getAvgDuration(events)
 }
 
-func (s *eventStoreServer) getAvgStoreDuration() string {
-	return ""
+func (s *eventStoreServer) getAvgStoreDuration() (string, error) {
+	events := s.getEventsWithTags(storeMetricTags)
+	return getAvgDuration(events)
+}
+
+func getAvgDuration(events []*pb.Event) (string, error) {
+	var err error
+	totalSeconds := float64(0)
+	for _, e := range events {
+		m := &Metric{}
+		if err = json.Unmarshal(e.Content, m); err != nil {
+			return "", err
+		}
+		totalSeconds += m.Dur.Seconds()
+	}
+
+	avg := totalSeconds / float64(len(events))
+	avgDuration, err := time.ParseDuration(fmt.Sprintf("%.10fs", avg))
+	if err != nil {
+		return "", err
+	}
+	return avgDuration.String(), nil
 }
 
 var (
