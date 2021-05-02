@@ -1,3 +1,33 @@
 syntax = "proto3";
 
 option go_package = "github.com/kfelter/grpc-example/eventstore";
+
+package eventstore;
+
+// Interface exported by the server.
+service EventStore {
+  rpc GetEvents(GetEventRequest) returns (stream Event) {}
+
+  rpc StoreEvents(stream NewEvent) returns (StoreEventsResponse) {}
+}
+
+message NewEvent {
+    repeated string tags = 1;
+    bytes content = 2;
+}
+
+message Event {
+    int64 id = 1;
+    repeated string tags = 2;
+    bytes content = 3;
+}
+
+message GetEventRequest {
+    int64 id = 1;
+    repeated string tags = 2;
+}
+
+message StoreEventsResponse {
+    repeated Event events = 1;
+    string status = 2;
+}
