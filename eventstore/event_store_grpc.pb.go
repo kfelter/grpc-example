@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion7
 type EventStoreClient interface {
 	GetEvents(ctx context.Context, in *GetEventRequest, opts ...grpc.CallOption) (EventStore_GetEventsClient, error)
 	StoreEvents(ctx context.Context, opts ...grpc.CallOption) (EventStore_StoreEventsClient, error)
+	ServerMetrics(ctx context.Context, in *ServerMestricsRequest, opts ...grpc.CallOption) (*ServerMetricsResponse, error)
 }
 
 type eventStoreClient struct {
@@ -96,12 +97,22 @@ func (x *eventStoreStoreEventsClient) CloseAndRecv() (*StoreEventsResponse, erro
 	return m, nil
 }
 
+func (c *eventStoreClient) ServerMetrics(ctx context.Context, in *ServerMestricsRequest, opts ...grpc.CallOption) (*ServerMetricsResponse, error) {
+	out := new(ServerMetricsResponse)
+	err := c.cc.Invoke(ctx, "/eventstore.EventStore/ServerMetrics", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // EventStoreServer is the server API for EventStore service.
 // All implementations must embed UnimplementedEventStoreServer
 // for forward compatibility
 type EventStoreServer interface {
 	GetEvents(*GetEventRequest, EventStore_GetEventsServer) error
 	StoreEvents(EventStore_StoreEventsServer) error
+	ServerMetrics(context.Context, *ServerMestricsRequest) (*ServerMetricsResponse, error)
 	mustEmbedUnimplementedEventStoreServer()
 }
 
@@ -114,6 +125,9 @@ func (UnimplementedEventStoreServer) GetEvents(*GetEventRequest, EventStore_GetE
 }
 func (UnimplementedEventStoreServer) StoreEvents(EventStore_StoreEventsServer) error {
 	return status.Errorf(codes.Unimplemented, "method StoreEvents not implemented")
+}
+func (UnimplementedEventStoreServer) ServerMetrics(context.Context, *ServerMestricsRequest) (*ServerMetricsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ServerMetrics not implemented")
 }
 func (UnimplementedEventStoreServer) mustEmbedUnimplementedEventStoreServer() {}
 
@@ -175,13 +189,36 @@ func (x *eventStoreStoreEventsServer) Recv() (*Event, error) {
 	return m, nil
 }
 
+func _EventStore_ServerMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ServerMestricsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EventStoreServer).ServerMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/eventstore.EventStore/ServerMetrics",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EventStoreServer).ServerMetrics(ctx, req.(*ServerMestricsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // EventStore_ServiceDesc is the grpc.ServiceDesc for EventStore service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var EventStore_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "eventstore.EventStore",
 	HandlerType: (*EventStoreServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ServerMetrics",
+			Handler:    _EventStore_ServerMetrics_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "GetEvents",

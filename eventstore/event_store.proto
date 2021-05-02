@@ -9,6 +9,8 @@ service EventStore {
   rpc GetEvents(GetEventRequest) returns (stream Event) {}
 
   rpc StoreEvents(stream Event) returns (StoreEventsResponse) {}
+
+  rpc ServerMetrics(ServerMestricsRequest) returns (ServerMetricsResponse) {}
 }
 
 message Event {
@@ -23,4 +25,12 @@ message GetEventRequest {
 message StoreEventsResponse {
     repeated Event events = 1;
     string status = 2;
+}
+
+message ServerMestricsRequest {}
+
+message ServerMetricsResponse{
+    string status = 1;
+    string avg_get_query_duration = 2;
+    string avg_store_duration = 3;
 }
