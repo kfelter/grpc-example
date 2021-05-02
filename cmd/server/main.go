@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"sync"
 
 	pb "github.com/kfelter/grpc-example/eventstore"
@@ -20,10 +21,10 @@ type eventStoreServer struct {
 }
 
 func (s *eventStoreServer) GetEvents(req *pb.GetEventRequest, stream pb.EventStore_GetEventsServer) error {
-	fmt.Println(req.String())
 	var err error
 	for _, event := range s.events {
 		if hasAll(event.Tags, req.Tags) {
+			fmt.Println("matched", req.Tags, "sending event", getID(event.GetTags()))
 			if err = stream.Send(event); err != nil {
 				return err
 			}
@@ -33,20 +34,29 @@ func (s *eventStoreServer) GetEvents(req *pb.GetEventRequest, stream pb.EventSto
 }
 
 func hasAll(has, requested []string) bool {
-	hasMap := map[string]int{}
-	for _, s := range has {
-		hasMap[s] = 1
-	}
+	reqMap := map[string]int{}
 	for _, s := range requested {
-		hasMap[s] = 0
+		reqMap[s] = 1
+	}
+	for _, s := range has {
+		reqMap[s] = 0
 	}
 
-	for _, count := range hasMap {
+	for _, count := range reqMap {
 		if count > 0 {
 			return false
 		}
 	}
 	return true
+}
+
+func getID(tags []string) string {
+	for _, t := range tags {
+		if strings.Contains(t, "id:") {
+			return t
+		}
+	}
+	return "no id"
 }
 
 func (s *eventStoreServer) StoreEvents(stream pb.EventStore_StoreEventsServer) error {

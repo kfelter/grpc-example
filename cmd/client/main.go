@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 
 	pb "github.com/kfelter/grpc-example/eventstore"
 	"google.golang.org/grpc"
@@ -37,6 +38,20 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
 	fmt.Println(reply.String())
+
+	getStream, err := client.GetEvents(context.Background(), &pb.GetEventRequest{
+		Tags: []string{"environment:test"},
+	})
+
+	for {
+		e, err := getStream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(e.String())
+	}
 }
