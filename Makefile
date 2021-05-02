@@ -6,3 +6,9 @@ proto: # generates the golang code from the .proto file
 mod:
 	go mod tidy
 	go mod vendor
+
+server:
+	go run cmd/server/main.go
+
+client:
+	go run cmd/client/main.go
