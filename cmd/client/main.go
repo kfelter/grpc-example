@@ -55,6 +55,13 @@ var (
 		Flags:  getFlags,
 		Action: get,
 	}
+
+	metricCommand = &cli.Command{
+		Name:   "metric",
+		Usage:  "get server metrics",
+		Flags:  []cli.Flag{serverAddrFlag},
+		Action: metric,
+	}
 )
 
 func main() {
@@ -64,6 +71,7 @@ func main() {
 		Commands: []*cli.Command{
 			storeCommand,
 			getCommand,
+			metricCommand,
 		},
 	}
 
@@ -131,5 +139,21 @@ func get(c *cli.Context) error {
 		}
 		fmt.Println(e.String())
 	}
+	return nil
+}
+
+func metric(c *cli.Context) error {
+	opts := []grpc.DialOption{grpc.WithInsecure()}
+	conn, err := grpc.Dial(c.String("server-addr"), opts...)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	client := pb.NewEventStoreClient(conn)
+	res, err := client.ServerMetrics(context.Background(), &pb.ServerMestricsRequest{})
+	if err != nil {
+		return err
+	}
+	fmt.Println(res.String())
 	return nil
 }

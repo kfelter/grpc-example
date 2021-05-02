@@ -165,6 +165,9 @@ func (s *eventStoreServer) getAvgStoreDuration() (string, error) {
 }
 
 func getAvgDuration(events []*pb.Event) (string, error) {
+	if len(events) == 0 {
+		return "no metrics yet", nil
+	}
 	var err error
 	totalSeconds := float64(0)
 	for _, e := range events {

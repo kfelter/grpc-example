@@ -14,12 +14,12 @@ client-help:
 	go run cmd/client/main.go
 
 add-many: # add many events
-	@echo "example event 0" | go run cmd/client/main.go store -t "env:test"
-	@echo "example event 1" | go run cmd/client/main.go store -t "env:test"
-	@echo "example event 2" | go run cmd/client/main.go store -t "env:stage"
-	@echo "example event 3" | go run cmd/client/main.go store -t "env:stage"
-	@echo "example event 4" | go run cmd/client/main.go store -t "env:prod"
-	@echo "example event 5" | go run cmd/client/main.go store -t "env:prod"
+	@go build -o client cmd/client/main.go
+	for number in $(shell seq 1 10000); do \
+    	printf "example event $$number $$(date)" | ./client store -t "env:test"; \
+		printf "example event $$number $$(date)" | ./client store -t "env:stage"; \
+		printf "example event $$number $$(date)" | ./client store -t "env:prod"; \
+	done
 
 get-prod:
 	go run cmd/client/main.go get -t "env:prod"
@@ -29,3 +29,7 @@ get-stage:
 
 get-test:
 	go run cmd/client/main.go get -t "env:test"
+
+metric:
+	go run cmd/client/main.go metric
+	
