@@ -35,8 +35,6 @@ make get-prod
 make metric
 ```
 
-
-
 # Resources
 | title | link|
 | - | - |
