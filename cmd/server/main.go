@@ -17,9 +17,32 @@ type eventStoreServer struct {
 
 func (s *eventStoreServer) GetEvents(req *pb.GetEventRequest, stream pb.EventStore_GetEventsServer) error {
 	fmt.Println(req.String())
-	// for _, event := range s.events {
-	// }
+	var err error
+	for _, event := range s.events {
+		if hasAll(event.Tags, req.Tags) {
+			if err = stream.Send(event); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+func hasAll(has, requested []string) bool {
+	hasMap := map[string]int{}
+	for _, s := range has {
+		hasMap[s] = 1
+	}
+	for _, s := range requested {
+		hasMap[s] = 0
+	}
+
+	for _, count := range hasMap {
+		if count > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *eventStoreServer) StoreEvents(stream pb.EventStore_StoreEventsServer) (*pb.StoreEventsResponse, error) {
