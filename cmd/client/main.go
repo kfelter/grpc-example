@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	e := pb.NewEvent{
+	e := pb.Event{
 		Content: []byte(`new event`),
 		Tags:    []string{"environment:test"},
 	}

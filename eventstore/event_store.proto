@@ -8,22 +8,15 @@ package eventstore;
 service EventStore {
   rpc GetEvents(GetEventRequest) returns (stream Event) {}
 
-  rpc StoreEvents(stream NewEvent) returns (StoreEventsResponse) {}
-}
-
-message NewEvent {
-    repeated string tags = 1;
-    bytes content = 2;
+  rpc StoreEvents(stream Event) returns (StoreEventsResponse) {}
 }
 
 message Event {
-    int64 id = 1;
     repeated string tags = 2;
     bytes content = 3;
 }
 
 message GetEventRequest {
-    int64 id = 1;
     repeated string tags = 2;
 }
 

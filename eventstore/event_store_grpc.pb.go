@@ -72,7 +72,7 @@ func (c *eventStoreClient) StoreEvents(ctx context.Context, opts ...grpc.CallOpt
 }
 
 type EventStore_StoreEventsClient interface {
-	Send(*NewEvent) error
+	Send(*Event) error
 	CloseAndRecv() (*StoreEventsResponse, error)
 	grpc.ClientStream
 }
@@ -81,7 +81,7 @@ type eventStoreStoreEventsClient struct {
 	grpc.ClientStream
 }
 
-func (x *eventStoreStoreEventsClient) Send(m *NewEvent) error {
+func (x *eventStoreStoreEventsClient) Send(m *Event) error {
 	return x.ClientStream.SendMsg(m)
 }
 
@@ -155,7 +155,7 @@ func _EventStore_StoreEvents_Handler(srv interface{}, stream grpc.ServerStream) 
 
 type EventStore_StoreEventsServer interface {
 	SendAndClose(*StoreEventsResponse) error
-	Recv() (*NewEvent, error)
+	Recv() (*Event, error)
 	grpc.ServerStream
 }
 
@@ -167,8 +167,8 @@ func (x *eventStoreStoreEventsServer) SendAndClose(m *StoreEventsResponse) error
 	return x.ServerStream.SendMsg(m)
 }
 
-func (x *eventStoreStoreEventsServer) Recv() (*NewEvent, error) {
-	m := new(NewEvent)
+func (x *eventStoreStoreEventsServer) Recv() (*Event, error) {
+	m := new(Event)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}

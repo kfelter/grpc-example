@@ -15,8 +15,10 @@ type eventStoreServer struct {
 	idCounter int64
 }
 
-func (s *eventStoreServer) GetEvents(req *pb.GetEventRequest) error {
+func (s *eventStoreServer) GetEvents(req *pb.GetEventRequest, stream pb.EventStore_GetEventsServer) error {
 	fmt.Println(req.String())
+	// for _, event := range s.events {
+	// }
 	return nil
 }
 
@@ -35,8 +37,7 @@ func (s *eventStoreServer) StoreEvents(stream pb.EventStore_StoreEventsServer) (
 		}
 		s.mu.Lock()
 		event := &pb.Event{
-			Id:      s.idCounter,
-			Tags:    newevent.GetTags(),
+			Tags:    append(newevent.GetTags(), fmt.Sprintf("id:%d", s.idCounter)),
 			Content: newevent.GetContent(),
 		}
 		events = append(events, event)
