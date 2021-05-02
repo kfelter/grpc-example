@@ -1,11 +1,15 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"sync"
 
 	pb "github.com/kfelter/grpc-example/eventstore"
+	"google.golang.org/grpc"
 )
 
 type eventStoreServer struct {
@@ -45,18 +49,18 @@ func hasAll(has, requested []string) bool {
 	return true
 }
 
-func (s *eventStoreServer) StoreEvents(stream pb.EventStore_StoreEventsServer) (*pb.StoreEventsResponse, error) {
+func (s *eventStoreServer) StoreEvents(stream pb.EventStore_StoreEventsServer) error {
 	events := []*pb.Event{}
 	for {
 		newevent, err := stream.Recv()
 		if err == io.EOF {
-			return &pb.StoreEventsResponse{
+			return stream.SendAndClose(&pb.StoreEventsResponse{
 				Events: events,
 				Status: fmt.Sprintf("added %d events", len(events)),
-			}, nil
+			})
 		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 		s.mu.Lock()
 		event := &pb.Event{
@@ -70,7 +74,22 @@ func (s *eventStoreServer) StoreEvents(stream pb.EventStore_StoreEventsServer) (
 	}
 }
 
+var (
+	port = flag.String("port", "10000", "server port")
+)
+
+func newServer() *eventStoreServer {
+	s := &eventStoreServer{events: make([]*pb.Event, 0)}
+	return s
+}
+
 func main() {
-	s := &eventStoreServer{}
-	fmt.Println(s)
+	flag.Parse()
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", *port))
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	grpcServer := grpc.NewServer()
+	pb.RegisterEventStoreServer(grpcServer, newServer())
+	grpcServer.Serve(lis)
 }
