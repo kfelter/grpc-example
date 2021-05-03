@@ -3,6 +3,14 @@ proto: # generates the golang code from the .proto file
     --go-grpc_out=. --go-grpc_opt=paths=source_relative \
     eventstore/event_store.proto
 
+rubyproto: # generates the ruby code from the .proto file
+	protoc --ruby_out=ruby  \
+	eventstore/event_store.proto
+
+python3proto: # generates the ruby code from the .proto file
+	protoc --python_out=python3  \
+    eventstore/event_store.proto
+
 mod:
 	go mod tidy
 	go mod vendor
