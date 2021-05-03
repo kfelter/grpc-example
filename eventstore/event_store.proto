@@ -17,6 +17,7 @@ service EventStore {
 }
 
 message Event {
+    string id = 1;
     repeated string tags = 2;
     bytes content = 3;
 }
