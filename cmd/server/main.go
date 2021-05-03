@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 var (
 	getMetricTags   = []string{"internal:true", "metric:get"}
 	storeMetricTags = []string{"internal:true", "metric:store"}
+	internalTags    = []string{"internal:true"}
 )
 
 type eventStoreServer struct {
@@ -31,11 +33,18 @@ type eventStoreServer struct {
 func (s *eventStoreServer) GetEvents(req *pb.GetEventRequest, stream pb.EventStore_GetEventsServer) error {
 	start := time.Now()
 	var err error
-	events := s.getEventsWithTags(req.Tags)
+	// exit early if there is an id tag
+	for _, t := range req.Tags {
+		if strings.Contains(t, "id:") {
+			return stream.Send(s.getEventWithIDTag(t))
+		}
+	}
+
+	// if no id tag, run query with all tags
+	events := s.getEventsWithTags(req.Tags, internalTags)
 	end := time.Now()
 	s.newGetMetric(start, end)
 	for _, event := range events {
-		fmt.Println("matched", req.Tags, "sending event", getID(event.GetTags()))
 		if err = stream.Send(event); err != nil {
 			return err
 		}
@@ -43,10 +52,32 @@ func (s *eventStoreServer) GetEvents(req *pb.GetEventRequest, stream pb.EventSto
 	return nil
 }
 
-func (s *eventStoreServer) getEventsWithTags(t []string) []*pb.Event {
+func (s *eventStoreServer) getEventWithIDTag(t string) *pb.Event {
+	var ss []string
+	if ss = strings.Split(t, ":"); len(ss) < 2 {
+		return &pb.Event{}
+	}
+
+	id, err := strconv.Atoi(ss[1])
+	if err != nil {
+		fmt.Println(err)
+		return &pb.Event{}
+	}
+	if s.idCounter < int64(id) {
+		fmt.Println("invalid id")
+		return &pb.Event{}
+	}
+	if hasNone(s.events[id].GetTags(), internalTags) {
+		return s.events[id]
+	}
+
+	return &pb.Event{}
+}
+
+func (s *eventStoreServer) getEventsWithTags(have, haveNone []string) []*pb.Event {
 	events := []*pb.Event{}
 	for _, event := range s.events {
-		if hasAll(event.Tags, t) {
+		if hasAll(event.Tags, have) && hasNone(event.Tags, haveNone) {
 			events = append(events, event)
 		}
 	}
@@ -64,6 +95,20 @@ func hasAll(has, requested []string) bool {
 
 	for _, count := range reqMap {
 		if count > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func hasNone(has, mustNotHave []string) bool {
+	noMap := map[string]int{}
+	for _, s := range mustNotHave {
+		noMap[s] = 1
+	}
+
+	for _, s := range has {
+		if noMap[s] > 0 {
 			return false
 		}
 	}
@@ -95,16 +140,18 @@ func (s *eventStoreServer) StoreEvents(stream pb.EventStore_StoreEventsServer) e
 		if err != nil {
 			return err
 		}
-		s.mu.Lock()
-		event := &pb.Event{
-			Tags:    append(newevent.GetTags(), fmt.Sprintf("id:%d", s.idCounter)),
-			Content: newevent.GetContent(),
-		}
-		events = append(events, event)
-		s.events = append(s.events, event)
-		s.idCounter++
-		s.mu.Unlock()
+		e := s.AppendEvent(newevent)
+		events = append(events, e)
 	}
+}
+
+func (s *eventStoreServer) AppendEvent(e *pb.Event) *pb.Event {
+	s.mu.Lock()
+	e.Tags = append(e.GetTags(), fmt.Sprintf("id:%d", s.idCounter))
+	s.events = append(s.events, e)
+	s.idCounter++
+	s.mu.Unlock()
+	return e
 }
 
 type Metric struct {
@@ -115,16 +162,12 @@ type Metric struct {
 
 func (s *eventStoreServer) newStoreMetric(start, end time.Time) {
 	e := createMetric(start, end, storeMetricTags...)
-	s.mu.Lock()
-	s.events = append(s.events, e)
-	s.mu.Unlock()
+	s.AppendEvent(e)
 }
 
 func (s *eventStoreServer) newGetMetric(start, end time.Time) {
 	e := createMetric(start, end, getMetricTags...)
-	s.mu.Lock()
-	s.events = append(s.events, e)
-	s.mu.Unlock()
+	s.AppendEvent(e)
 }
 
 func createMetric(start, end time.Time, tags ...string) *pb.Event {
@@ -155,12 +198,12 @@ func (s *eventStoreServer) ServerMetrics(c context.Context, req *pb.ServerMestri
 }
 
 func (s *eventStoreServer) getAvgGetQueryDuration() (string, error) {
-	events := s.getEventsWithTags(getMetricTags)
+	events := s.getEventsWithTags(getMetricTags, nil)
 	return getAvgDuration(events)
 }
 
 func (s *eventStoreServer) getAvgStoreDuration() (string, error) {
-	events := s.getEventsWithTags(storeMetricTags)
+	events := s.getEventsWithTags(storeMetricTags, nil)
 	return getAvgDuration(events)
 }
 
