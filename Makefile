@@ -7,8 +7,8 @@ rubyproto: # generates the ruby code from the .proto file
 	protoc --ruby_out=ruby  \
 	eventstore/event_store.proto
 
-python3proto: # generates the ruby code from the .proto file
-	protoc --python_out=python3  \
+python2proto: # generates the ruby code from the .proto file
+	protoc --python_out=python2  \
     eventstore/event_store.proto
 
 mod:
