@@ -21,12 +21,15 @@ message Event {
     bytes content = 3;
 }
 
+message EventList {
+    repeated Event events = 1;
+}
+
 message GetEventRequest {
     repeated string tags = 2;
 }
 
 message StoreEventsResponse {
-    repeated Event events = 1;
     string status = 2;
 }
 
@@ -37,4 +40,5 @@ message ServerMetricsResponse{
     string avg_get_query_duration = 2;
     string avg_store_duration = 3;
     int64 len_events = 4;
+    string size = 5;
 }

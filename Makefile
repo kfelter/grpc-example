@@ -16,8 +16,8 @@ client-help:
 add-many: # add many events
 	@go build -o client cmd/client/main.go
 	@for number in $(shell seq 1 10000); do \
-    	printf "example event $$number $$(date)" | ./client store -t "env:test"; \
-		printf "example event $$number $$(date)" | ./client store -t "env:stage"; \
+    	printf "example event $$number $$(date)" | ./client store -t "env:test" -t "ttl:1s"; \
+		printf "example event $$number $$(date)" | ./client store -t "env:stage" -t "ttl:5s"; \
 		printf "example event $$number $$(date)" | ./client store -t "env:prod"; \
 	done
 

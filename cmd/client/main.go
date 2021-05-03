@@ -10,6 +10,7 @@ import (
 	pb "github.com/kfelter/grpc-example/eventstore"
 	"github.com/urfave/cli/v2"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -24,6 +25,20 @@ var (
 		Aliases: []string{"u"},
 		Value:   "localhost:10000",
 		Usage:   "grpc address server host:port",
+	}
+
+	inFileFlag = &cli.StringFlag{
+		Name:    "in-file",
+		Aliases: []string{"i"},
+		Value:   "server.dump",
+		Usage:   "file path to load db from",
+	}
+
+	outFileFlag = &cli.StringFlag{
+		Name:    "out-file",
+		Aliases: []string{"o"},
+		Value:   "server.dump",
+		Usage:   "file path to dump db",
 	}
 
 	getFlags = []cli.Flag{
@@ -62,6 +77,20 @@ var (
 		Flags:  []cli.Flag{serverAddrFlag},
 		Action: metric,
 	}
+
+	saveCommand = &cli.Command{
+		Name:   "save",
+		Usage:  "save the db to a file",
+		Flags:  []cli.Flag{serverAddrFlag, outFileFlag},
+		Action: save,
+	}
+
+	loadCommand = &cli.Command{
+		Name:   "load",
+		Usage:  "load the db from a file",
+		Flags:  []cli.Flag{serverAddrFlag, inFileFlag},
+		Action: load,
+	}
 )
 
 func main() {
@@ -72,6 +101,8 @@ func main() {
 			storeCommand,
 			getCommand,
 			metricCommand,
+			saveCommand,
+			loadCommand,
 		},
 	}
 
@@ -139,6 +170,69 @@ func get(c *cli.Context) error {
 		}
 		fmt.Println(e.String())
 	}
+	return nil
+}
+
+func save(c *cli.Context) error {
+	opts := []grpc.DialOption{grpc.WithInsecure()}
+	conn, err := grpc.Dial(c.String("server-addr"), opts...)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	client := pb.NewEventStoreClient(conn)
+	getStream, err := client.GetEvents(context.Background(), &pb.GetEventRequest{})
+
+	eventList := pb.EventList{}
+	for {
+		e, err := getStream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		eventList.Events = append(eventList.Events, e)
+	}
+	b, err := proto.Marshal(&eventList)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(c.String("out-file"), b, os.ModePerm)
+}
+
+func load(c *cli.Context) error {
+	opts := []grpc.DialOption{grpc.WithInsecure()}
+	conn, err := grpc.Dial(c.String("server-addr"), opts...)
+	if err != nil {
+		panic(err)
+	}
+	defer conn.Close()
+	client := pb.NewEventStoreClient(conn)
+	stream, err := client.StoreEvents(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
+	eventList := &pb.EventList{}
+	b, err := os.ReadFile(c.String("in-file"))
+	err = proto.Unmarshal(b, eventList)
+	if err != nil {
+		return err
+	}
+	for _, e := range eventList.Events {
+		err = stream.Send(e)
+		if err != nil {
+			return err
+		}
+	}
+
+	reply, err := stream.CloseAndRecv()
+	if err != nil {
+		return err
+	}
+	fmt.Println(reply.String())
 	return nil
 }
 
