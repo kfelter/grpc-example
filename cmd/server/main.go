@@ -8,19 +8,17 @@ import (
 	"io"
 	"log"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	pb "github.com/kfelter/grpc-example/eventstore"
+	"github.com/kfelter/grpc-example/internal/metric"
+	"github.com/kfelter/grpc-example/internal/tag"
 	"google.golang.org/grpc"
 )
 
 var (
-	getMetricTags   = []string{"metric:get"}
-	storeMetricTags = []string{"metric:store"}
-
 	port = flag.String("port", "10000", "server port")
 )
 
@@ -28,10 +26,110 @@ type eventStoreServer struct {
 	pb.UnimplementedEventStoreServer
 	mu          sync.Mutex
 	muLocal     sync.Mutex
+	muChat      sync.Mutex
 	events      []*pb.Event
 	local       []*pb.Event
-	defragCount int
-	defragLimit int
+	chat        map[string][]*pb.Event
+	defragDelay time.Duration
+}
+
+func (s *eventStoreServer) Join(stream pb.EventStore_JoinServer) error {
+	e, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	channel := tag.GetChan(e.GetTags())
+	var userIDTag string
+	if uid, found := tag.GetUserID(e.GetTags()); found {
+		userIDTag = uid
+	} else {
+		userIDTag = fmt.Sprintf("user_id:%s", uuid.New().String())
+	}
+
+	cur, err := s.SendChatHist(stream, channel)
+	if err != nil {
+		return err
+	}
+
+	errChan := make(chan error)
+
+	go func() {
+		for {
+			e, err := stream.Recv()
+			if err != nil {
+				errChan <- err
+				return
+			}
+			fmt.Println("recv", e.String())
+			s.RecordChat(channel, userIDTag, e)
+		}
+	}()
+
+	go s.SendChatUpdates(stream, channel, userIDTag, cur, errChan)
+	err = <-errChan
+	if err == io.EOF {
+		return nil
+	}
+	return err
+}
+
+func (s *eventStoreServer) SendChatUpdates(stream pb.EventStore_JoinServer, channel, userIDTag string, cur int, errChan chan error) {
+	var err error
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		<-ticker.C
+		s.muChat.Lock()
+		chatMessages := s.chat[channel]
+		s.muChat.Unlock()
+
+		for ; cur < len(chatMessages); cur++ {
+			if err = stream.Send(chatMessages[cur]); err != nil {
+				errChan <- err
+			}
+		}
+	}
+}
+
+func (s *eventStoreServer) SendChatHist(stream pb.EventStore_JoinServer, channel string) (int, error) {
+	cur := 0
+	s.muChat.Lock()
+	chatMessages := s.chat[channel]
+	s.muChat.Unlock()
+	for ; cur < len(chatMessages); cur++ {
+		if err := stream.Send(chatMessages[cur]); err != nil {
+			return 0, err
+		}
+	}
+	return cur, nil
+}
+
+func (s *eventStoreServer) RecordChat(channel, userIDTag string, e *pb.Event) {
+	e.Tags = append(e.GetTags(), getDefaultTags(e.GetTags(), userIDTag)...)
+	s.muChat.Lock()
+	defer s.muChat.Unlock()
+	s.chat[channel] = append(s.chat[channel], e)
+}
+
+func (s *eventStoreServer) getLastID() string {
+	e := s.getLastEvent()
+	curID, _ := tag.GetID(e.GetTags())
+	return curID
+}
+
+func (s *eventStoreServer) getIndex(id string) int {
+	for i, e := range s.events {
+		if v, _ := tag.GetID(e.GetTags()); v == id {
+			return i
+		}
+	}
+	return 0
+}
+
+func (s *eventStoreServer) getLastEvent() *pb.Event {
+	if len(s.events) > 0 {
+		return s.events[len(s.events)-1]
+	}
+	return &pb.Event{}
 }
 
 func (s *eventStoreServer) GetEvents(req *pb.GetEventRequest, stream pb.EventStore_GetEventsServer) error {
@@ -53,11 +151,10 @@ func (s *eventStoreServer) getEventsWithTags(have, haveNone []string) []*pb.Even
 	defer s.mu.Unlock()
 	events := []*pb.Event{}
 	for i, event := range s.events {
-		if hasAll(event.Tags, have) && hasNone(event.Tags, haveNone) {
+		if tag.Q(event.GetTags(), have, haveNone) {
 			// check expired
 			if expired(event) {
-				s.events[i] = &pb.Event{Tags: []string{"deleted:true"}}
-				go s.defrag()
+				s.events[i] = &pb.Event{Tags: []string{tag.DeletedTag}}
 			} else {
 				events = append(events, event)
 			}
@@ -67,15 +164,8 @@ func (s *eventStoreServer) getEventsWithTags(have, haveNone []string) []*pb.Even
 }
 
 func (s *eventStoreServer) defrag() {
-	if s.defragCount < s.defragLimit {
-		s.defragCount++
-		return
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.defragCount == 0 {
-		return
-	}
 	events := []*pb.Event{}
 	for _, e := range s.events {
 		if notDeleted(e) {
@@ -84,13 +174,11 @@ func (s *eventStoreServer) defrag() {
 	}
 	if len(s.events) == len(events) {
 		fmt.Println("no deleted items to defrag")
-		s.defragCount = -s.defragLimit
 		return
 	}
 
 	prevLen := len(s.events)
 	s.events = events
-	s.defragCount = 0
 	fmt.Println("defragged", prevLen-len(events), len(events))
 }
 
@@ -106,11 +194,11 @@ func notDeleted(e *pb.Event) bool {
 func (s *eventStoreServer) getLocalEventsWithTags(have, haveNone []string) []*pb.Event {
 	events := []*pb.Event{}
 	for i, event := range s.local {
-		if hasAll(event.Tags, have) && hasNone(event.Tags, haveNone) {
+		if tag.Q(event.GetTags(), have, haveNone) {
 			// check expired
 			if expired(event) {
 				s.mu.Lock()
-				s.local[i] = &pb.Event{Tags: []string{"deleted:true"}}
+				s.local[i] = &pb.Event{Tags: []string{tag.DeletedTag}}
 				s.mu.Unlock()
 			} else {
 				events = append(events, event)
@@ -121,85 +209,11 @@ func (s *eventStoreServer) getLocalEventsWithTags(have, haveNone []string) []*pb
 }
 
 func expired(e *pb.Event) bool {
-	var ttl time.Duration
-	var createdAt time.Time
-	hasTTL := false
-	for _, t := range e.GetTags() {
-		if strings.Contains(t, "ttl:") {
-			hasTTL = true
-			ttl = getTTL(t)
-		}
-		if strings.Contains(t, "created_at:") {
-			createdAt = getTime(t)
-		}
-	}
+	tags := e.GetTags()
+	ttl, hasTTL := tag.GetTTL(tags)
+	createdAt, _ := tag.GetCreatedAt(tags)
 	expired := time.Now().UTC().After(createdAt.Add(ttl))
 	return hasTTL && expired
-}
-
-func getTTL(t string) time.Duration {
-	ss := strings.Split(t, "ttl:")
-	if len(ss) < 2 {
-		return 0
-	}
-	dur, err := time.ParseDuration(ss[1])
-	if err != nil {
-		return 0
-	}
-	return dur
-}
-
-func getTime(t string) time.Time {
-
-	ss := strings.Split(t, "created_at:")
-	if len(ss) < 2 {
-		return time.Now().UTC()
-	}
-	tagTime, err := time.Parse(time.RFC3339Nano, ss[1])
-	if err != nil {
-		return time.Now().UTC()
-	}
-	return tagTime
-}
-
-func hasAll(has, requested []string) bool {
-	reqMap := map[string]int{}
-	for _, s := range requested {
-		reqMap[s] = 1
-	}
-	for _, s := range has {
-		reqMap[s] = 0
-	}
-
-	for _, count := range reqMap {
-		if count > 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func hasNone(has, mustNotHave []string) bool {
-	noMap := map[string]int{}
-	for _, s := range mustNotHave {
-		noMap[s] = 1
-	}
-
-	for _, s := range has {
-		if noMap[s] > 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func getID(tags []string) string {
-	for _, t := range tags {
-		if strings.Contains(t, "id:") {
-			return t
-		}
-	}
-	return "no id"
 }
 
 func (s *eventStoreServer) StoreEvents(stream pb.EventStore_StoreEventsServer) error {
@@ -220,27 +234,25 @@ func (s *eventStoreServer) StoreEvents(stream pb.EventStore_StoreEventsServer) e
 	}
 }
 
-func (s *eventStoreServer) AppendEvent(e *pb.Event) *pb.Event {
-	s.mu.Lock()
+func (s *eventStoreServer) AppendEvent(e *pb.Event, tags ...string) *pb.Event {
+	if e == nil {
+		return &pb.Event{}
+	}
 	e.Tags = append(e.GetTags(), getDefaultTags(e.Tags)...)
+	e.Tags = append(e.GetTags(), tags...)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.events = append(s.events, e)
-	s.mu.Unlock()
 	return e
 }
 
-type Metric struct {
-	Start time.Time     `json:"start"`
-	End   time.Time     `json:"end"`
-	Dur   time.Duration `json:"duration"`
-}
-
 func (s *eventStoreServer) newStoreMetric(start, end time.Time) {
-	e := createMetric(start, end, storeMetricTags...)
+	e := createMetric(start, end, tag.StoreMetricTag)
 	s.AppendLocalEvent(e)
 }
 
 func (s *eventStoreServer) newGetMetric(start, end time.Time) {
-	e := createMetric(start, end, getMetricTags...)
+	e := createMetric(start, end, tag.GetMetricTag)
 	s.AppendLocalEvent(e)
 }
 
@@ -252,33 +264,23 @@ func (s *eventStoreServer) AppendLocalEvent(e *pb.Event) *pb.Event {
 	return e
 }
 
-func getDefaultTags(tags []string) []string {
+func getDefaultTags(tags []string, extra ...string) []string {
 	defaultTags := []string{}
-	if getID(tags) == "no id" {
-		defaultTags = append(defaultTags, fmt.Sprintf("id:%s", uuid.New().String()))
+	if _, found := tag.GetID(tags); !found {
+		defaultTags = append(defaultTags, tag.NewID())
 	}
-	if getCreatedAt(tags) == "no date" {
-		defaultTags = append(defaultTags, fmt.Sprintf("created_at:%v", time.Now().UTC().Format(time.RFC3339Nano)))
+	if _, found := tag.GetCreatedAt(tags); !found {
+		defaultTags = append(defaultTags, tag.NewCreatedAtTag(time.Now()))
 	} else {
-		defaultTags = append(defaultTags, fmt.Sprintf("updated_at:%v", time.Now().UTC().Format(time.RFC3339Nano)))
+		defaultTags = append(defaultTags, tag.NewUpdatedAtTag(time.Now()))
 	}
-	return defaultTags
-}
-
-func getCreatedAt(tags []string) string {
-	for _, t := range tags {
-		if strings.Contains(t, "created_at:") {
-			return t
-		}
-	}
-	return "no date"
+	return append(defaultTags, extra...)
 }
 
 func createMetric(start, end time.Time, tags ...string) *pb.Event {
-	b, _ := json.Marshal(Metric{start, end, end.Sub(start)})
 	return &pb.Event{
 		Tags:    tags,
-		Content: b,
+		Content: metric.Metric{start, end, end.Sub(start)}.Buf(),
 	}
 }
 
@@ -341,12 +343,12 @@ func countEventList(events []*pb.Event) int64 {
 }
 
 func (s *eventStoreServer) getAvgGetQueryDuration() (string, error) {
-	events := s.getLocalEventsWithTags(getMetricTags, nil)
+	events := s.getLocalEventsWithTags([]string{tag.GetMetricTag}, nil)
 	return getAvgDuration(events)
 }
 
 func (s *eventStoreServer) getAvgStoreDuration() (string, error) {
-	events := s.getLocalEventsWithTags(storeMetricTags, nil)
+	events := s.getLocalEventsWithTags([]string{tag.StoreMetricTag}, nil)
 	return getAvgDuration(events)
 }
 
@@ -357,7 +359,7 @@ func getAvgDuration(events []*pb.Event) (string, error) {
 	var err error
 	totalSeconds := float64(0)
 	for _, e := range events {
-		m := &Metric{}
+		m := &metric.Metric{}
 		if err = json.Unmarshal(e.Content, m); err != nil {
 			return "", err
 		}
@@ -372,8 +374,17 @@ func getAvgDuration(events []*pb.Event) (string, error) {
 	return avgDuration.String(), nil
 }
 
+func (s *eventStoreServer) startDefragger() {
+	ticker := time.NewTicker(s.defragDelay)
+	for {
+		<-ticker.C
+		s.defrag()
+	}
+}
+
 func newServer() *eventStoreServer {
-	s := &eventStoreServer{events: make([]*pb.Event, 0), defragLimit: 1000}
+	s := &eventStoreServer{events: make([]*pb.Event, 0), defragDelay: 10 * time.Minute, local: make([]*pb.Event, 0), chat: make(map[string][]*pb.Event, 0)}
+	go s.startDefragger()
 	return s
 }
 

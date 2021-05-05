@@ -2,6 +2,8 @@ package main
 
 import (
 	"testing"
+
+	"github.com/kfelter/grpc-example/internal/tag"
 )
 
 func Test_hasAll(t *testing.T) {
@@ -65,7 +67,7 @@ func Test_hasAll(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hasAll(tt.args.has, tt.args.requested); got != tt.want {
+			if got := tag.HasAll(tt.args.has, tt.args.requested...); got != tt.want {
 				t.Log("has", tt.args.has, "requested", tt.args.requested)
 				t.Errorf("hasAll() = %v, want %v", got, tt.want)
 			}
@@ -105,7 +107,7 @@ func Test_getID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := getID(tt.args.tags); got != tt.want {
+			if got, _ := tag.GetID(tt.args.tags); got != tt.want {
 				t.Errorf("getID() = %v, want %v", got, tt.want)
 			}
 		})

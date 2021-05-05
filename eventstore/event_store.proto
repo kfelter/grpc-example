@@ -12,6 +12,9 @@ service EventStore {
   // Stores events that come in on the stream
   rpc StoreEvents(stream Event) returns (StoreEventsResponse) {}
 
+  // Join an event stream by creating a send and receive stream
+  rpc Join(stream Event) returns (stream Event) {}
+
   // Returns the server metrics
   rpc ServerMetrics(ServerMestricsRequest) returns (ServerMetricsResponse) {}
 }
@@ -43,3 +46,5 @@ message ServerMetricsResponse{
     int64 len_events = 4;
     string size = 5;
 }
+
+message JoinRequest {}

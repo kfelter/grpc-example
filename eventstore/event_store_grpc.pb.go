@@ -22,6 +22,8 @@ type EventStoreClient interface {
 	GetEvents(ctx context.Context, in *GetEventRequest, opts ...grpc.CallOption) (EventStore_GetEventsClient, error)
 	// Stores events that come in on the stream
 	StoreEvents(ctx context.Context, opts ...grpc.CallOption) (EventStore_StoreEventsClient, error)
+	// Join an event stream by creating a send and receive stream
+	Join(ctx context.Context, opts ...grpc.CallOption) (EventStore_JoinClient, error)
 	// Returns the server metrics
 	ServerMetrics(ctx context.Context, in *ServerMestricsRequest, opts ...grpc.CallOption) (*ServerMetricsResponse, error)
 }
@@ -100,6 +102,37 @@ func (x *eventStoreStoreEventsClient) CloseAndRecv() (*StoreEventsResponse, erro
 	return m, nil
 }
 
+func (c *eventStoreClient) Join(ctx context.Context, opts ...grpc.CallOption) (EventStore_JoinClient, error) {
+	stream, err := c.cc.NewStream(ctx, &EventStore_ServiceDesc.Streams[2], "/eventstore.EventStore/Join", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &eventStoreJoinClient{stream}
+	return x, nil
+}
+
+type EventStore_JoinClient interface {
+	Send(*Event) error
+	Recv() (*Event, error)
+	grpc.ClientStream
+}
+
+type eventStoreJoinClient struct {
+	grpc.ClientStream
+}
+
+func (x *eventStoreJoinClient) Send(m *Event) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *eventStoreJoinClient) Recv() (*Event, error) {
+	m := new(Event)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *eventStoreClient) ServerMetrics(ctx context.Context, in *ServerMestricsRequest, opts ...grpc.CallOption) (*ServerMetricsResponse, error) {
 	out := new(ServerMetricsResponse)
 	err := c.cc.Invoke(ctx, "/eventstore.EventStore/ServerMetrics", in, out, opts...)
@@ -117,6 +150,8 @@ type EventStoreServer interface {
 	GetEvents(*GetEventRequest, EventStore_GetEventsServer) error
 	// Stores events that come in on the stream
 	StoreEvents(EventStore_StoreEventsServer) error
+	// Join an event stream by creating a send and receive stream
+	Join(EventStore_JoinServer) error
 	// Returns the server metrics
 	ServerMetrics(context.Context, *ServerMestricsRequest) (*ServerMetricsResponse, error)
 	mustEmbedUnimplementedEventStoreServer()
@@ -131,6 +166,9 @@ func (UnimplementedEventStoreServer) GetEvents(*GetEventRequest, EventStore_GetE
 }
 func (UnimplementedEventStoreServer) StoreEvents(EventStore_StoreEventsServer) error {
 	return status.Errorf(codes.Unimplemented, "method StoreEvents not implemented")
+}
+func (UnimplementedEventStoreServer) Join(EventStore_JoinServer) error {
+	return status.Errorf(codes.Unimplemented, "method Join not implemented")
 }
 func (UnimplementedEventStoreServer) ServerMetrics(context.Context, *ServerMestricsRequest) (*ServerMetricsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ServerMetrics not implemented")
@@ -195,6 +233,32 @@ func (x *eventStoreStoreEventsServer) Recv() (*Event, error) {
 	return m, nil
 }
 
+func _EventStore_Join_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(EventStoreServer).Join(&eventStoreJoinServer{stream})
+}
+
+type EventStore_JoinServer interface {
+	Send(*Event) error
+	Recv() (*Event, error)
+	grpc.ServerStream
+}
+
+type eventStoreJoinServer struct {
+	grpc.ServerStream
+}
+
+func (x *eventStoreJoinServer) Send(m *Event) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *eventStoreJoinServer) Recv() (*Event, error) {
+	m := new(Event)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func _EventStore_ServerMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ServerMestricsRequest)
 	if err := dec(in); err != nil {
@@ -234,6 +298,12 @@ var EventStore_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "StoreEvents",
 			Handler:       _EventStore_StoreEvents_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "Join",
+			Handler:       _EventStore_Join_Handler,
+			ServerStreams: true,
 			ClientStreams: true,
 		},
 	},

@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"strings"
 
 	pb "github.com/kfelter/grpc-example/eventstore"
+	"github.com/kfelter/grpc-example/internal/tag"
 	"github.com/urfave/cli/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -91,6 +94,13 @@ var (
 		Flags:  []cli.Flag{serverAddrFlag, inFileFlag},
 		Action: load,
 	}
+
+	joinCommand = &cli.Command{
+		Name:   "join",
+		Usage:  "join a set of tags to send and receive",
+		Flags:  []cli.Flag{serverAddrFlag, tagsFlag},
+		Action: join,
+	}
 )
 
 func main() {
@@ -103,6 +113,7 @@ func main() {
 			metricCommand,
 			saveCommand,
 			loadCommand,
+			joinCommand,
 		},
 	}
 
@@ -250,4 +261,54 @@ func metric(c *cli.Context) error {
 	}
 	fmt.Println(res.String())
 	return nil
+}
+
+func join(c *cli.Context) error {
+	opts := []grpc.DialOption{grpc.WithInsecure()}
+	conn, err := grpc.Dial(c.String("server-addr"), opts...)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	client := pb.NewEventStoreClient(conn)
+	stream, err := client.Join(context.Background())
+	if err != nil {
+		return err
+	}
+	tags := c.StringSlice(tagsFlag.Name)
+	err = stream.Send(&pb.Event{Tags: tags})
+	if err != nil {
+		return err
+	}
+	msgChan := make(chan *pb.Event)
+	go startReciever(stream, msgChan)
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if string(line) == `\q` {
+			break
+		}
+		fmt.Println()
+
+		e := &pb.Event{Tags: tags, Content: line}
+		err = stream.Send(e)
+		if err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
+}
+
+func startReciever(stream pb.EventStore_JoinClient, msgChan chan *pb.Event) {
+	for {
+		e, err := stream.Recv()
+		if err != nil {
+			panic(err)
+		}
+		userID, _ := tag.GetUserID(e.GetTags())
+		userID = strings.Split(userID, "user_id:")[1]
+		fmt.Printf("%-40s | %s\n", userID, string(e.GetContent()))
+		// fmt.Println(e.String())
+	}
 }

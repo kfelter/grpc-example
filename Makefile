@@ -18,8 +18,8 @@ mod:
 server:
 	go run cmd/server/main.go
 
-client-help:
-	go run cmd/client/main.go
+c:
+	go build -o cl cmd/client/main.go
 
 add-many: # add many events
 	@go build -o client cmd/client/main.go
