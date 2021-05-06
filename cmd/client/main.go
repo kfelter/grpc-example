@@ -124,13 +124,8 @@ func main() {
 }
 
 func store(c *cli.Context) error {
-	opts := []grpc.DialOption{grpc.WithInsecure()}
-	conn, err := grpc.Dial(c.String("server-addr"), opts...)
-	if err != nil {
-		panic(err)
-	}
-	defer conn.Close()
-	client := pb.NewEventStoreClient(conn)
+	client, close := NewEventStoreClient(c.String("server-addr"))
+	defer close()
 	stream, err := client.StoreEvents(context.Background())
 	if err != nil {
 		panic(err)
@@ -160,16 +155,14 @@ func store(c *cli.Context) error {
 }
 
 func get(c *cli.Context) error {
-	opts := []grpc.DialOption{grpc.WithInsecure()}
-	conn, err := grpc.Dial(c.String("server-addr"), opts...)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	client := pb.NewEventStoreClient(conn)
+	client, close := NewEventStoreClient(c.String("server-addr"))
+	defer close()
 	getStream, err := client.GetEvents(context.Background(), &pb.GetEventRequest{
 		Tags: c.StringSlice("tags"),
 	})
+	if err != nil {
+		panic(err)
+	}
 
 	for {
 		e, err := getStream.Recv()
@@ -185,13 +178,8 @@ func get(c *cli.Context) error {
 }
 
 func save(c *cli.Context) error {
-	opts := []grpc.DialOption{grpc.WithInsecure()}
-	conn, err := grpc.Dial(c.String("server-addr"), opts...)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	client := pb.NewEventStoreClient(conn)
+	client, close := NewEventStoreClient(c.String("server-addr"))
+	defer close()
 	getStream, err := client.GetEvents(context.Background(), &pb.GetEventRequest{})
 
 	eventList := pb.EventList{}
@@ -214,13 +202,8 @@ func save(c *cli.Context) error {
 }
 
 func load(c *cli.Context) error {
-	opts := []grpc.DialOption{grpc.WithInsecure()}
-	conn, err := grpc.Dial(c.String("server-addr"), opts...)
-	if err != nil {
-		panic(err)
-	}
-	defer conn.Close()
-	client := pb.NewEventStoreClient(conn)
+	client, close := NewEventStoreClient(c.String("server-addr"))
+	defer close()
 	stream, err := client.StoreEvents(context.Background())
 	if err != nil {
 		panic(err)
@@ -248,13 +231,8 @@ func load(c *cli.Context) error {
 }
 
 func metric(c *cli.Context) error {
-	opts := []grpc.DialOption{grpc.WithInsecure()}
-	conn, err := grpc.Dial(c.String("server-addr"), opts...)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	client := pb.NewEventStoreClient(conn)
+	client, close := NewEventStoreClient(c.String("server-addr"))
+	defer close()
 	res, err := client.ServerMetrics(context.Background(), &pb.ServerMestricsRequest{})
 	if err != nil {
 		return err
@@ -264,13 +242,8 @@ func metric(c *cli.Context) error {
 }
 
 func join(c *cli.Context) error {
-	opts := []grpc.DialOption{grpc.WithInsecure()}
-	conn, err := grpc.Dial(c.String("server-addr"), opts...)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	client := pb.NewEventStoreClient(conn)
+	client, close := NewEventStoreClient(c.String("server-addr"))
+	defer close()
 	stream, err := client.Join(context.Background())
 	if err != nil {
 		return err
@@ -311,4 +284,14 @@ func startReciever(stream pb.EventStore_JoinClient, msgChan chan *pb.Event) {
 		fmt.Printf("%-40s | %s\n", userID, string(e.GetContent()))
 		// fmt.Println(e.String())
 	}
+}
+
+func NewEventStoreClient(addr string) (pb.EventStoreClient, func()) {
+	opts := []grpc.DialOption{grpc.WithInsecure()}
+	conn, err := grpc.Dial(addr, opts...)
+	if err != nil {
+		panic(err)
+	}
+
+	return pb.NewEventStoreClient(conn), func() { conn.Close() }
 }
