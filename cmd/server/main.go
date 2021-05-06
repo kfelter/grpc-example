@@ -383,7 +383,12 @@ func (s *eventStoreServer) startDefragger() {
 }
 
 func newServer() *eventStoreServer {
-	s := &eventStoreServer{events: make([]*pb.Event, 0), defragDelay: 10 * time.Minute, local: make([]*pb.Event, 0), chat: make(map[string][]*pb.Event, 0)}
+	s := &eventStoreServer{
+		events:      make([]*pb.Event, 0),
+		defragDelay: 10 * time.Minute,
+		local:       make([]*pb.Event, 0),
+		chat:        make(map[string][]*pb.Event, 0),
+	}
 	go s.startDefragger()
 	return s
 }
